@@ -76,5 +76,3 @@ buildCallGraph funs =
                 (\y -> (head $ funstart x, y))
                 $ collectCalls x)
             funs)
-
-sodoku :: [(Function, [Functino])] -> [(Function, [Function])]

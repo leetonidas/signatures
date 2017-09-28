@@ -26,9 +26,6 @@ type BBChecker = BasicBlock -> BasicBlock -> Constrains -> (Bool, Constrains)
 constrainNodeSize :: BBChecker
 constrainNodeSize b1 b2 _ = (checkBBSize b1 b2, Map.empty)
 
-checkBBSize :: BasicBlock -> BasicBlock -> Bool
-checkBBSize bb1 bb2 = (4 * abs (bbinsCount bb2 - bbinsCount bb1)) `div` max (bbinsCount bb1) (bbinsCount bb2) == 0
-
 checkCalls :: BBChecker
 checkCalls b1 b2 cs | length bc1 /= length bc2 = (False, Map.empty)
                     | not . null $ Map.filter Set.null matched = (False, Map.empty)
@@ -52,7 +49,7 @@ advancedNodeCheck fun f1 f2 n1 n2 cs =case List.find (\ x -> bbstart x == n1) (f
 
 checkGraphs :: Function -> Function -> (Bool, Constrains)
 checkGraphs f1 f2 = case concatMap
-    (\ (n1,n2) -> matchGraphs (fromFunction f1) n1 (fromFunction f2) n2 (advancedNodeCheck compareBlocks f1 f2))
+    (\ (n1,n2) -> matchGraphs (fromFunction f1) n1 (fromFunction f2) n2 (advancedNodeCheck compareBlocks f1 f2) (\ a b -> b))
     $ combinations (funstart f1) (funstart f2) of
         [] -> (False, Map.empty)
         xs -> (True, unionsConstrains $ map constrains xs)

@@ -18,6 +18,7 @@ library
   exposed-modules:     Signatures.Nuc
                      , Signatures.Graph
                      , Signatures.Function
+                     , Signatures.CFG
   build-depends:       base >= 4.7 && < 5
                      , containers
                      , parsec

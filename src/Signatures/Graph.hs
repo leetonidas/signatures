@@ -20,6 +20,7 @@ import Data.Maybe
 type Node = Int
 type Constrains = IntMap.IntMap (Set.Set Int)
 type Checker = Node -> Node -> Constrains -> (Bool, Constrains)
+type ExpOrder = Node -> [Node] -> [Node]
 
 data DiGraph = DiGraph {
     nodes :: Set.Set Node,
@@ -61,19 +62,23 @@ combTest :: [a] -> [b] -> [(a,b)]
 combTest [] _ = []
 combTest (a:_) y = map (\ b -> (a,b)) y
 
+selectiveCombine :: ExpOrder -> [Node] -> [Node] -> [(Node, Node)]
+selectiveCombine _ [] = const []
+selectiveCombine ord as = combTest as . ord (head as)  
+
 getMatches :: Node -> ((Node, Node) -> Node) -> GraphMatch -> Set.Set (Node, Node)
 getMatches x f= Set.filter ((==) x . f) . matches
 
-matchGraphsSkip :: DiGraph -> DiGraph -> GraphMatch -> Checker -> Node -> Node -> [GraphMatch]
-matchGraphsSkip g1 g2 ma fu n1 n2 | length suc1New /= length suc2New = []
+matchGraphsSkip :: DiGraph -> DiGraph -> GraphMatch -> Checker -> ExpOrder -> Node -> Node -> [GraphMatch]
+matchGraphsSkip g1 g2 ma fu ord n1 n2 | length suc1New /= length suc2New = []
                                   | otherwise = if null suc1New then
                                             [ma]
                                         else
                                             concatMap
-                                                (\x -> matchGraphsSkip g1 g2 x fu n1 n2)
+                                                (\x -> matchGraphsSkip g1 g2 x fu ord n1 n2)
                                                 . concatMap
-                                                    (uncurry (matchGraphsHelp g1 g2 ma fu))
-                                                    . combTest
+                                                    (uncurry (matchGraphsHelp g1 g2 ma fu ord))
+                                                    . (selectiveCombine ord)
                                                         (Set.toList suc1New)
                                                         $ Set.toList suc2New
                                     where suc1 = successor n1 g1
@@ -82,17 +87,17 @@ matchGraphsSkip g1 g2 ma fu n1 n2 | length suc1New /= length suc2New = []
                                           suc2New = Set.difference suc2 $ Set.map snd (matches ma)
 
 -- graph a -> graph b -> matched nodes
-matchGraphsHelp :: DiGraph -> DiGraph -> GraphMatch -> Checker -> Node -> Node -> [GraphMatch]
-matchGraphsHelp g1 g2 ma fu n1 n2   | not isMatch || length suc1 /= length suc2 = []
+matchGraphsHelp :: DiGraph -> DiGraph -> GraphMatch -> Checker -> ExpOrder -> Node -> Node -> [GraphMatch]
+matchGraphsHelp g1 g2 ma fu ord n1 n2   | not isMatch || length suc1 /= length suc2 = []
                                     | Set.isSubsetOf tar suc2 && length suc1New == length suc2New =
                                         if null suc1New then
                                             [newMa]
                                         else
                                             concatMap
-                                                (\ x -> matchGraphsSkip g1 g2 x fu n1 n2)
+                                                (\ x -> matchGraphsSkip g1 g2 x fu ord n1 n2)
                                                 . concatMap
-                                                    (uncurry (matchGraphsHelp g1 g2 newMa fu))
-                                                    . combTest (Set.toList suc1New)
+                                                    (uncurry (matchGraphsHelp g1 g2 newMa fu ord))
+                                                    . (selectiveCombine ord) (Set.toList suc1New)
                                                         $ Set.toList suc2New
                                     | otherwise = []
                                         where (isMatch, newCons) = fu n1 n2 $ constrains ma
@@ -139,8 +144,8 @@ matchGraphsHint g1 g2 ma n1 n2   | length suc1 /= length suc2 = []
                                               suc2New = Set.difference suc2 $ Set.map snd (matches ma)
                                               newMa = ma {matches = Set.insert (n1, n2) $ matches ma}
 
-matchGraphs :: DiGraph -> Node -> DiGraph -> Node -> Checker -> [GraphMatch]
-matchGraphs g1 n1 g2 n2 fu = matchGraphsHelp g1 g2 (GraM Set.empty IntMap.empty) fu n1 n2
+matchGraphs :: DiGraph -> Node -> DiGraph -> Node -> Checker -> ExpOrder -> [GraphMatch]
+matchGraphs g1 n1 g2 n2 fu ord = matchGraphsHelp g1 g2 (GraM Set.empty IntMap.empty) fu ord n1 n2
 
 matchGraphsWithConstrains :: DiGraph -> Node -> DiGraph -> Node -> Constrains -> [GraphMatch]
 matchGraphsWithConstrains g1 n1 g2 n2 cons = matchGraphsHint g1 g2 (GraM Set.empty cons) n1 n2

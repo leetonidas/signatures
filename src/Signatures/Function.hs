@@ -1,8 +1,10 @@
 module Signatures.Function (
         BasicBlock(..),
         Function(..),
+        bestMatch,
         buildFun,
         collectCalls,
+        checkBBSize,
         getFunName,
         inlineLeaves,
         mergeCandidats,
@@ -115,6 +117,11 @@ mergeNodes entryNodes blocks =
             mc -> mergeNodes entryNodes (map (uncurry mergeNode) mc
                 ++ removeBlocksFrom (concatMap (\ (a,b) -> [a,b]) mc) blocks)
 
+bestMatch :: BasicBlock -> [BasicBlock] -> [BasicBlock]
+bestMatch bl = List.sortOn (\ a -> abs (bbinsCount bl - bbinsCount a)) . filter
+    (\ a -> length (bbanc a) == length (bbanc bl)
+        && length (bbcall a) == length (bbcall bl))
+
 mergeNode :: BasicBlock -> BasicBlock -> BasicBlock
 mergeNode (BB s i _ c) (BB _ i2 a c2) = BB s (i + i2) a (c ++ c2)
 
@@ -142,3 +149,6 @@ buildFun = buildFunHelp (Fun [] "" [])
 
 collectCalls :: Function -> Set.Set Int
 collectCalls = foldr (Set.union . Set.fromList . bbcall) Set.empty . funblocks
+
+checkBBSize :: BasicBlock -> BasicBlock -> Bool
+checkBBSize bb1 bb2 = (4 * abs (bbinsCount bb2 - bbinsCount bb1)) `div` max (bbinsCount bb1) (bbinsCount bb2) == 0
