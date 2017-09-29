@@ -38,9 +38,10 @@ matchGroup callGra1 callGra2 (a, b, c) = (a, filter
         . using (matchFunctions b c) $ parList rseq)
 
 statsForGroup :: [(Function, [Function])] -> (Int, Int, Int, Int)
-statsForGroup matches = (countUniqueCorrect, countCorrect, count - countCorrect, count)
-    where correct = filter (uncurry List.elem) matches
+statsForGroup matches = (countUniqueCorrect, countCorrect, countFalsePositive, count)
+    where (correct, wrong) = List.partition (uncurry List.elem) matches
           countUniqueCorrect = length $ filter ((==) 1 . length . snd) correct
+          countFalsePositive = length $ filter (not . null . snd) wrong
           countCorrect = length correct
           count = length matches
 
