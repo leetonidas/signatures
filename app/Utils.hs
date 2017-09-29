@@ -1,6 +1,6 @@
 module Utils (
         buildCallGraph,
-        fromFunction,
+--        fromFunction,
         getFromNuc,
         groupByBlockCount,
         normalizeCalls,
@@ -10,7 +10,7 @@ module Utils (
 import Control.Monad
 import Data.Maybe
 import qualified Data.List as List
-import qualified Data.Set as Set
+import qualified Data.IntSet as Set
 import qualified Data.IntMap.Strict as IntMap
 import Text.Parsec
 import Control.Parallel
@@ -32,11 +32,6 @@ getFromNuc path =
             parseNuc
             path
             <$> readFile path
-
-fromFunction :: Function -> DiGraph
-fromFunction (Fun _ _ b) = DiGraph
-    (Set.fromList $ map bbstart b)
-    . Set.fromList $ concatMap (\ x -> map (\y -> (bbstart x, y)) $ bbanc x) b
 
 groupByBlockCount :: [Function] -> [(Int, [Function])]
 groupByBlockCount = 
@@ -66,13 +61,13 @@ normalizeFunCalls fun mapping = fun {
 normalizeCalls :: [Function] -> [Function]
 normalizeCalls funs = map (`normalizeFunCalls` buildEntryMap funs) funs `using` parListChunk 50 rseq
 
+
 buildCallGraph :: [Function] -> DiGraph
 buildCallGraph funs =
     DiGraph
-        (Set.fromList 
+        (Set.fromList
             $ map (head . funstart) funs)
-        (Set.unions . withStrategy (parListChunk 50 rseq) $ map
-            (\x -> Set.mapMonotonic
-                (\y -> (head $ funstart x, y))
-                $ collectCalls x)
+        (foldr
+            (\ fun -> IntMap.insert (head $ funstart fun) (Set.toList $ collectCalls fun))
+            IntMap.empty
             funs)

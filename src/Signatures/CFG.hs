@@ -1,5 +1,6 @@
 module Signatures.CFG (
     CFG(..),
+    Constrains(..),
     DiGraph(..),
     bestFit,
     checkCalls,
@@ -11,16 +12,14 @@ module Signatures.CFG (
 
 import qualified Data.IntMap as IntMap
 import qualified Data.List as List
-import qualified Data.Set as Set
+import qualified Data.IntSet as Set
 import Data.Maybe
 
 import Signatures.Function
+import Signatures.Graph
 
-type Node = Int
-type Constrains = IntMap.IntMap (Set.Set Int)
+type Constrains = IntMap.IntMap Set.IntSet
 type Checker = BasicBlock -> BasicBlock -> Constrains -> (Bool, Constrains)
-type ExpOrder = Node -> [Node] -> [Node]
-
 
 data CFG = CFG {
 entry   :: Node,
@@ -28,12 +27,7 @@ mapping :: IntMap.IntMap BasicBlock,
 graph   :: DiGraph
 } deriving Show
 
-data DiGraph = DiGraph {
-nodes :: Set.Set Node,
-edges :: IntMap.IntMap [Node]
-} deriving Show
-
-data GraphMatch = GraM {
+data CFGMatch = CFGMatch {
 matches :: IntMap.IntMap Node,
 constrains :: Constrains
 } deriving Show
@@ -41,9 +35,17 @@ constrains :: Constrains
 successor :: Node -> DiGraph -> [Node]
 successor n = IntMap.findWithDefault [] n . edges
 
+sanitize :: DiGraph -> DiGraph
+sanitize dg = dg {edges = IntMap.map (filter (flip Set.member (nodes dg))) $ edges dg}
+
+myFromJust :: String -> Maybe a -> a
+myFromJust str dat = case dat of
+    Nothing -> error str
+    Just di -> di
+
 cfgFromFunction :: Function -> CFG
 cfgFromFunction fun = CFG
-    (fromJust $ IntMap.lookup (head $ funstart fun) bwdMapping)
+    (myFromJust "cfgFromFunction" $ IntMap.lookup (head $ funstart fun) bwdMapping)
     fwdMapping
     $ renameNodes (fromFunction fun) bwdMapping
         where fwdMapping = IntMap.fromList $ zip [1..] $ funblocks fun
@@ -51,11 +53,12 @@ cfgFromFunction fun = CFG
 
 renameNodes :: DiGraph -> IntMap.IntMap Node -> DiGraph
 renameNodes (DiGraph n e) mapping = DiGraph (Set.fromList $ IntMap.elems mapping) .
-    IntMap.mapKeys update $ IntMap.map (map update) e
-        where update = fromJust . flip IntMap.lookup mapping
+    IntMap.mapKeys update1 $ IntMap.map (map update) e
+        where update1 = myFromJust "update1" . flip IntMap.lookup mapping
+              update = (\ x -> myFromJust ("elem " ++ show x ++ "not found in " ++ show mapping) $ IntMap.lookup x mapping)
 
 fromFunction :: Function -> DiGraph
-fromFunction (Fun _ _ b) = DiGraph
+fromFunction (Fun _ _ b) = sanitize . DiGraph
     (Set.fromList $ map bbstart b)
     . IntMap.fromList $ map (\ bl -> (bbstart bl, bbanc bl)) b
 
@@ -66,7 +69,7 @@ checkCalls :: Checker
 checkCalls b1 b2 cs | length bc1 /= length bc2 = (False, IntMap.empty)
                     | any (maybe 
                             False
-                            (null . Set.intersection bc2Set)
+                            (Set.null . Set.intersection bc2Set)
                             . flip IntMap.lookup cs)
                         bc1 = (False, IntMap.empty)
                     | otherwise = (True, newCons)
@@ -83,15 +86,16 @@ matchNodes fs ft cs ns nt = case IntMap.lookup ns (mapping fs) of
         Just bt -> if checkBBSize bs bt then checkCalls bs bt cs else (False, IntMap.empty)
 
 bestFit :: CFG -> CFG -> Node -> [Node] -> [Node]
-bestFit fs ft ns nts = List.sortOn (abs . (-) (bbinsCount bs) . bbinsCount . fromJust . flip IntMap.lookup (mapping ft)) eligible
-    where bs = fromJust $ IntMap.lookup ns (mapping fs)
+bestFit fs ft ns nts = List.map fst $ List.sortOn (abs . (-) (bbinsCount bs) . bbinsCount . snd) eligible
+    where bs = myFromJust "bf2" $ IntMap.lookup ns (mapping fs)
+          comb = map (\ x -> (x, fromJust . IntMap.lookup x $ mapping ft)) nts
           eligible = filter
-            ((\ bt -> checkBBSize bs bt &&
+            (\ (_,bt) -> checkBBSize bs bt &&
                 length (bbcall bs) == length (bbcall bt) &&
                 length (bbanc bs) == length (bbanc bt))
-            . fromJust . flip IntMap.lookup (mapping ft)) nts
+            comb
 
-matchCFGSkip :: CFG -> CFG -> GraphMatch -> Node -> Node -> [GraphMatch]
+matchCFGSkip :: CFG -> CFG -> CFGMatch -> Node -> Node -> [CFGMatch]
 matchCFGSkip fs ft ma ns nt  | length suc1New /= length suc2New = []
                              | otherwise = if null suc1New then
                                         [ma]
@@ -109,7 +113,7 @@ matchCFGSkip fs ft ma ns nt  | length suc1New /= length suc2New = []
                                           suc2New = Set.toList . Set.difference (Set.fromList suc2) . Set.fromList . IntMap.elems $ matches ma
 
 -- graph a -> graph b -> matched nodes
-matchCFGHelp :: CFG -> CFG -> GraphMatch -> Node -> Node -> [GraphMatch]
+matchCFGHelp :: CFG -> CFG -> CFGMatch -> Node -> Node -> [CFGMatch]
 matchCFGHelp fs ft ma ns nt  | not isMatch || length suc1 /= length suc2 = []
                              | Set.isSubsetOf tar (Set.fromList suc2) && length suc1New == length suc2New =
                                     if null suc1New then
@@ -129,7 +133,7 @@ matchCFGHelp fs ft ma ns nt  | not isMatch || length suc1 /= length suc2 = []
                                           tar = Set.fromList $ mapMaybe (flip IntMap.lookup (matches ma)) suc1
                                           suc1New = filter (flip IntMap.notMember (matches ma)) suc1
                                           suc2New = Set.toList . Set.difference (Set.fromList suc2) . Set.fromList . IntMap.elems $ matches ma
-                                          newMa = GraM (IntMap.insert ns nt $ matches ma) newCons
+                                          newMa = CFGMatch (IntMap.insert ns nt $ matches ma) newCons
 
-matchCFG :: CFG -> CFG -> [GraphMatch]
-matchCFG fs ft = matchCFGHelp fs ft (GraM IntMap.empty IntMap.empty) (entry fs) (entry ft)
+matchCFG :: CFG -> CFG -> [CFGMatch]
+matchCFG fs ft = matchCFGHelp fs ft (CFGMatch IntMap.empty IntMap.empty) (entry fs) (entry ft)

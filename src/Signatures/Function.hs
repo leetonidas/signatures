@@ -17,7 +17,7 @@ module Signatures.Function (
     ) where
 
 import qualified Data.List as List
-import qualified Data.Set as Set
+import qualified Data.IntSet as Set
 import Data.Maybe
 import Numeric (showHex)
 
@@ -35,6 +35,9 @@ data Function = Fun {
     funname :: String,
     funblocks :: [BasicBlock]
 } deriving Show
+
+instance Eq Function where
+    (==) = (\ a b -> (not . null $ funname a) && funname a == funname b)
 
 getFunName :: Function -> String
 getFunName (Fun s n _) = if not $ null n then n else "fun_" ++ showHex (minimum s) ""
@@ -147,7 +150,7 @@ buildFunHelp (Fun x n _) (Fblk b : ps) = buildFunHelp (Fun x n $ map buildBB b) 
 buildFun :: [Fprop] -> Function
 buildFun = buildFunHelp (Fun [] "" [])
 
-collectCalls :: Function -> Set.Set Int
+collectCalls :: Function -> Set.IntSet
 collectCalls = foldr (Set.union . Set.fromList . bbcall) Set.empty . funblocks
 
 checkBBSize :: BasicBlock -> BasicBlock -> Bool

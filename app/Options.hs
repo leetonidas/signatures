@@ -19,7 +19,8 @@ data Options = Options {
     optOutDir :: String,
     optMin :: Int,
     optMode :: Mode,
-    optNormalize :: Bool
+    optNormalize :: Bool,
+    optSkipPrint :: Bool
 } deriving Show
 
 options :: [OptDescr (Options -> Options)]
@@ -30,7 +31,8 @@ options =
     , Option ['d'] ["dir"]     (ReqArg (\ s x -> x {optOutDir = s}) "DIR")  "the directory for the output file(s)"
     , Option ['l'] ["level"]   (ReqArg (\ s x -> x {optMode = getMode s}) "level")   "the level used ( dot | info | loose | strict )"
     , Option ['m'] ["min"]     (ReqArg (\ s x -> x {optMin = read s}) "num") "the minimum number of blocks to be considered for matching"
-    , Option [] ["no-normalize"] (NoArg (\ x -> x {optNormalize = False})) "does not normalize functions before matching"]
+    , Option [] ["no-normalize"] (NoArg (\ x -> x {optNormalize = False})) "does not normalize functions before matching"
+    , Option ['n'] ["no-print"] (NoArg (\ x -> x {optSkipPrint = True})) "prevents the program to print the list of matched functions"]
 
 getMode :: String -> Mode
 getMode opt = case opt of
@@ -40,7 +42,7 @@ getMode opt = case opt of
     "info" -> MInfo
 
 defaultOps :: Options
-defaultOps = Options False "" "" "out" 13 MInfo True
+defaultOps = Options False "" "" "out" 13 MInfo True False
 
 sigOpts :: [String] -> Maybe Options
 sigOpts argv =

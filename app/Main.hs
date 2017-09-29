@@ -4,6 +4,7 @@ import Control.Arrow
 import Control.Monad
 import Control.Parallel
 import Control.Parallel.Strategies
+import Control.DeepSeq
 import Data.Maybe
 import qualified Data.List as List
 import qualified Data.Set as Set
@@ -26,6 +27,23 @@ runSignatures opt | isNothing opt || not (checkOpt optJ) = getUsageInfo <$> getP
                   | otherwise = runStrict optJ
                     where optJ = fromJust opt
 
+checkCallGraph :: DiGraph -> DiGraph -> Function -> [Function] -> (Function, [Function])
+checkCallGraph cg1 cg2 sig tars = (sig, filter (canMatch cg1 cg2 sig) tars) 
+
+matchGroup :: DiGraph -> DiGraph -> (Int, [Function], [Function]) -> (Int, [(Function, [Function])])
+matchGroup callGra1 callGra2 (a, b, c) = (a, filter
+    (not . null . snd)
+        . map
+        (uncurry $ checkCallGraph callGra1 callGra2)
+        . using (matchFunctions b c) $ parList rseq)
+
+statsForGroup :: [(Function, [Function])] -> (Int, Int, Int, Int)
+statsForGroup matches = (countUniqueCorrect, countCorrect, count - countCorrect, count)
+    where correct = filter (uncurry List.elem) matches
+          countUniqueCorrect = length $ filter ((==) 1 . length . snd) correct
+          countCorrect = length correct
+          count = length matches
+
 runDot, runStrict, runLoose, runInfo :: Options -> IO ()
 runDot opts = printDotFiles outdir
     =<< map normalize <$> getFromNuc (optSigNuc opts)
@@ -46,6 +64,7 @@ runLoose opt = do
     _ <- f2 `seq` when (optVerbose opt) (putStrLn $ "loaded " ++ show (length f1) ++ " functions from " ++ optSigNuc opt) 
     _ <- when (optVerbose opt) (putStrLn $ "loaded " ++ show (length f2) ++ " functions from " ++ optTarNuc opt)
     let callGra1 = buildCallGraph f1
+    let callGra2 = callGra1 `par` buildCallGraph f2
     let f2Names = Set.fromList
             . map funname
                 $ filter
@@ -59,49 +78,22 @@ runLoose opt = do
                         && (not . null $ funname x)
                         && (funname x `Set.member` f2Names))
                     f1
-    let callGra2 = callGra1 `par` buildCallGraph f2
     let groups =
             reverse . dropWhile ((>) (optMin opt) . (\ (x,_,_) -> x))
                 . mapMaybe
                     (\ (bc, funs) -> maybe Nothing (\x -> Just (bc, funs, x)) . lookup bc $ groupByBlockCount f2)
                     $ groupByBlockCount f1
-    let matched = par callGra2 . seq groups $ parMap rseq
-            (\ (a,b,c) -> (a, filter
-                (not . null . snd)
-                . map
-                    (\ (a,bs) -> (a, filter (canMatch callGra1 callGra2 a) $ map fst bs))
-                    $ matchFunctions b c))
-                groups
+    
+    let matched = parMap rseq (matchGroup callGra1 callGra2) groups
 
     let named_match = matched `seq` parMap rseq (second $ filter (not . null . funname . fst)) matched
 
-    let stats = if not $ optVerbose opt then [] else parMap rseq (\ (a,x) -> 
-            let unique = filter ((==) 1 . length . snd)
-                uniquMatched = unique x in "matching: " ++ show a ++ " ( "
-                        ++ show (length $ filter (\ (f,ms) -> funname f == funname (head ms)) uniquMatched)
-                        ++ " | " ++ show (length uniquMatched)
-                        ++ " | " ++ show
-                            (length . filter
-                                (\x -> (not . null $ funname x)
-                                    && (funname x `Set.member` possMatch))
-                                . (\ (_,x,_) -> x)
-                                    . fromJust
-                                        $ List.find ((==) a . (\ (x,_,_) -> x)) groups)
-                        ++ ")")
-                named_match
+    let stats = map (second statsForGroup) named_match
     
-    _ <- stats `seq` when (optVerbose opt) $ mapM_ putStrLn stats 
-    _ <- putStr "Matches: "
-    _ <- putStr . (\ (a,b) -> "(" ++ show a ++ " | " ++ show b ++ " | ")
-            $ foldl
-                (\ (a,b) mt -> let named = snd mt in
-                    let unique = filter ((==) 1 . length . snd) named in
-                        let correct = filter (\ (a,b) -> funname a == funname (head b)) unique in
-                            (a + length correct, b + length unique))
-                (0, 0)
-                named_match
-    _ <- putStrLn $ show (length possMatch) ++ ")"
-    putStrLn . unlines . withStrategy (parListChunk 50 rseq) . map (\ x -> getFunName (fst x) ++ " -> " ++ unwords (map getFunName $ snd x)) 
+    _ <- when (optVerbose opt) $ mapM_ (\ (a,b) -> putStrLn $ "nodes: " ++ show a ++ ": " ++ show b) stats
+    _ <- putStrLn . ((++) "Total: " . show) . (\ (a,b,c) -> (a,b,c, length possMatch)) $ foldr (\ (_,(a1,b1,c1,_)) (a2,b2,c2) -> (a1 + a2, b1 + b2, c1 + c2)) (0,0,0) stats
+
+    when (not $ optSkipPrint opt) . putStrLn . unlines . withStrategy (parListChunk 50 rseq) . map (\ x -> getFunName (fst x) ++ " -> " ++ unwords (map getFunName $ snd x)) 
         $ concatMap snd matched
 runStrict _ = putStrLn "Strict Mode"
 
