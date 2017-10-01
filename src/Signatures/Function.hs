@@ -8,6 +8,7 @@ module Signatures.Function (
         getFunName,
         inlineLeaves,
         mergeCandidats,
+        mergeNode,
         mergeNodes,
         nEntryBlocks,
         normalize,

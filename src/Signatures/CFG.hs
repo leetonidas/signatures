@@ -6,6 +6,7 @@ module Signatures.CFG (
     bestFit,
     checkCalls,
     cfgFromFunction,
+    combineNodes,
     extractLeafs,
     matchCFG,
     matchNodes,
@@ -142,31 +143,56 @@ deleteFromCFG (CFG ent ma (DiGraph no ed)) del =
         . DiGraph
             (IntSet.difference no del)
                 $ IntMap.withoutKeys ed del
-              
+
+candidates :: CFG -> IntMap.IntMap Node
+candidates cfg = IntMap.filter (`IntSet.member` singleEntry) $ IntMap.fromSet (head . flip successor gr) singleExit
+    where gr = graph cfg
+          singleEntry = IntSet.delete (entry cfg) $ singleEntryNodes gr
+          singleExit = singleExitNodes gr
+
+combineNodes :: CFG -> CFG
+combineNodes cfg | null toMerge = cfg
+                 | otherwise = combineNodes $ CFG (entry cfg)
+                        (IntMap.union updMa $ IntMap.withoutKeys blkMap del)
+                        (DiGraph (IntSet.difference oldNod del) (IntMap.union updGr $ IntMap.withoutKeys oldEdg del))
+                            where (DiGraph oldNod oldEdg) = graph cfg
+                                  cds = candidates cfg
+                                  blkMap = mapping cfg
+                                  toMerge = IntMap.filter (`IntSet.notMember` IntMap.keysSet cds) cds
+                                  (updMa, updGr, del) = IntMap.foldrWithKey
+                                        (\ src tar (uM,uG,d) ->
+                                            (IntMap.insert src (mergeNode (fromJust $ IntMap.lookup src blkMap) (fromJust $ IntMap.lookup tar blkMap)) uM,
+                                            IntMap.insert src (successor tar $ graph cfg) uG,
+                                            IntSet.insert tar d))
+                                        (IntMap.empty, IntMap.empty, IntSet.empty)
+                                        toMerge
 
 getLeafs :: CFG -> IntSet.IntSet
-getLeafs = IntMap.keysSet . IntMap.filter (null . bbanc) . mapping
-
+getLeafs = IntMap.keysSet . IntMap.filter null . edges . graph
+                                    
 nodesToInline :: IntSet.IntSet -> CFG -> IntSet.IntSet
-nodesToInline leafs = IntMap.keysSet . IntMap.filter (any (`IntSet.member` leafs) . bbanc) . mapping
+nodesToInline leafs = IntMap.keysSet . IntMap.filter (any (`IntSet.member` leafs)) . edges . graph
 
-extractLeafs' :: CFG -> [Node] -> IntSet.IntSet -> Int -> [(Int, BasicBlock)] -> CFG
-extractLeafs' cfg [] leafs _ upd = newCFG {mapping = IntMap.withoutKeys (mapping newCFG) leafs}
-    where newCFG = flip deleteFromCFG leafs . updateCFG cfg $ IntMap.fromList upd
-extractLeafs' cfg (n:ns) leafs maxIndexUsed upd =
-    extractLeafs'
-        cfg
-        ns
-        leafs
-        (maxIndexUsed + length newBlocks)
-        ((n,updatedBlock):newBlocks ++ upd)
-    where orig = fromJust . IntMap.lookup n $ mapping cfg
-          (toUpd, retain) = List.partition (`IntSet.member` leafs) $ bbanc orig
-          newBlocks = zip [maxIndexUsed + 1..] $ mapMaybe (`IntMap.lookup` mapping cfg) toUpd
-          updatedBlock = orig {bbanc = retain ++ map fst newBlocks}
+extractLeafs' :: CFG -> [Node] -> IntSet.IntSet -> Int -> IntMap.IntMap [Node] -> IntMap.IntMap BasicBlock -> CFG
+extractLeafs' cfg [] leafs _ updGr updMa = cfg {
+        mapping = IntMap.union updMa $ IntMap.withoutKeys (mapping cfg) leafs,
+        graph = DiGraph
+            (IntSet.union (IntMap.keysSet updMa) $ IntSet.difference oldNod leafs)
+            (IntMap.union updGr oldEdg)}
+                where (DiGraph oldNod oldEdg) = graph cfg
+extractLeafs' cfg (n:ns) leafs maxIndexUsed updGr updMa =
+    extractLeafs' cfg ns leafs
+        (maxIndexUsed + length newMaps)
+        (IntMap.union updNodes updGr)
+        (IntMap.union (IntMap.fromList newMaps) updMa)
+    where orig = successor n $ graph cfg
+          (toUpd, retain) = List.partition (`IntSet.member` leafs) orig
+          newMaps = zip [maxIndexUsed + 1..] $ map (fromJust . flip IntMap.lookup (mapping cfg)) toUpd
+          newIds = map fst newMaps
+          updNodes = IntMap.insert n (newIds ++ retain) . IntMap.fromSet (const []) $ IntSet.fromList newIds
 
 extractLeafs :: CFG -> CFG
-extractLeafs cfg = extractLeafs' cfg (IntSet.toList $ nodesToInline leafs cfg) leafs (fst . IntMap.findMax $ mapping cfg) []
+extractLeafs cfg = extractLeafs' cfg (IntSet.toList $ nodesToInline leafs cfg) leafs (fst . IntMap.findMax $ mapping cfg) IntMap.empty IntMap.empty
     where leafs = getLeafs cfg
 
 renameNodes :: DiGraph -> IntMap.IntMap Node -> DiGraph
