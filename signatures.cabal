@@ -19,9 +19,11 @@ library
                      , Signatures.Graph
                      , Signatures.Function
                      , Signatures.CFG
+                     , Signatures.Queue
   build-depends:       base >= 4.7 && < 5
                      , containers >= 0.5.10.2
                      , parsec
+                     , extra
   default-language:    Haskell2010
 
 executable signatures-exe
@@ -37,7 +39,6 @@ executable signatures-exe
                      , parsec
                      , directory
                      , parallel
-                     , deepseq
   default-language:    Haskell2010
 
 test-suite signatures-test

@@ -5,6 +5,9 @@ module Signatures.Graph (
         diGraphToDot,
         localComplexity,
         matchGraphs,
+        singleEntryNodes,
+        singleExitNodes,
+        transpose
     ) where
 
 import qualified Data.IntMap.Lazy as IntMap
@@ -30,8 +33,17 @@ diGraphToDot (DiGraph n e) =
     ++ List.foldl
         (\ s (a,b) -> s ++ "b_" ++ show a ++ " -> b_" ++ show b ++ ";\n")
         "\n"
-        (IntMap.assocs e)
+        (concatMap (\ (a,b) -> [(a,c) | c <- b]) $ IntMap.assocs e)
     ++ "}"
+
+transpose :: DiGraph -> DiGraph
+transpose dg = dg {edges = IntMap.foldrWithKey (\ k ls mp -> foldr (flip (IntMap.insertWith (++)) [k]) mp ls) IntMap.empty $ edges dg}
+
+singleExitNodes :: DiGraph -> IntSet.IntSet
+singleExitNodes = IntMap.keysSet . IntMap.filter ((==) 1 . length) . edges
+
+singleEntryNodes :: DiGraph -> IntSet.IntSet
+singleEntryNodes = singleExitNodes . transpose
 
 successor :: Node -> DiGraph -> [Node]
 successor n = IntMap.findWithDefault [] n . edges

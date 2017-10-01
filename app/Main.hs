@@ -4,7 +4,6 @@ import Control.Arrow
 import Control.Monad
 import Control.Parallel
 import Control.Parallel.Strategies
-import Control.DeepSeq
 import Data.Maybe
 import qualified Data.List as List
 import qualified Data.Set as Set
