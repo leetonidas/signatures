@@ -168,7 +168,7 @@ combineNodes cfg | null toMerge = cfg
                                         toMerge
 
 getLeafs :: CFG -> IntSet.IntSet
-getLeafs = IntMap.keysSet . IntMap.filter null . edges . graph
+getLeafs cfg = IntSet.delete (entry cfg) . IntMap.keysSet . IntMap.filter null . edges $ graph cfg
                                     
 nodesToInline :: IntSet.IntSet -> CFG -> IntSet.IntSet
 nodesToInline leafs = IntMap.keysSet . IntMap.filter (any (`IntSet.member` leafs)) . edges . graph

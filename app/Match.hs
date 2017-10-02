@@ -7,7 +7,10 @@ module Match (
 --        intersectsConstrains,
 --        unionsConstrains,
 --        constrainsFromMatch,
-        matchFunctions
+        matchFunctions,
+        matchFunctions2,
+        matchBatchCFG,
+        funFromCFGmatch
     ) where
 
 import Control.Arrow (second)
@@ -71,6 +74,17 @@ matchFunctions fsigs ftars = map (\ x -> (x, fst $ checkList x ftars)) fsigs
 
 matchFunctions :: [Function] -> [Function] -> [(Function, [Function])]
 matchFunctions fsigs ftars = map (\ x -> (x, fst $ checkAll x ftars)) fsigs
+
+matchFunctions2 :: [Function] -> [Function] -> Bool -> [(Function, [Function])]
+matchFunctions2 fsigs ftars nrm = map (\ (a,b) -> (a, map fst $ filter (not . null . matchCFG b . snd) cfgTars)) cfgSgis
+    where cfgSgis = map (\ a -> (a, (if nrm then combineNodes . extractLeafs else id) $ cfgFromFunction a)) fsigs
+          cfgTars = map (\ a -> (a, (if nrm then combineNodes . extractLeafs else id) $ cfgFromFunction a)) ftars
+
+matchBatchCFG :: [(Function, CFG)] -> [(Function, CFG)] -> [(Function, [Function])]
+matchBatchCFG fsigs ftars = map (\ s -> let sCfg = snd s in (fst s, map fst $ filter (not . null . matchCFG sCfg . snd) ftars)) fsigs
+
+funFromCFGmatch :: CFG -> Map.IntMap Function -> Function
+funFromCFGmatch cfg funMap = fromJust $ Map.lookup (bbstart . fromJust . Map.lookup (entry cfg) $ mapping cfg) funMap
 
 {-
 constrainsFromMatch :: Function -> [Function] -> Constrains
