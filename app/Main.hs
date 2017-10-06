@@ -57,23 +57,20 @@ statsForGroup matches = (countUniqueCorrect, countCorrect, countFalsePositive, c
 collectNames :: [Function] -> [String]
 collectNames funs = filter (not . null) $ map funname funs
 
-groupByCFGNodeCount :: [(Function, CFG)] -> [(Int, [(Function, CFG)])]
-groupByCFGNodeCount = map (\ a -> (length . mapping . snd $ head a, a)) 
-    . List.groupBy (\ a b -> (length . mapping $ snd a) == (length . mapping $ snd b))
-        . List.sortOn (length . mapping . snd)
-
 runDot, runStrict, runLoose, runInfo :: Options -> IO ()
 runDot opts = printDotFiles outdir
     =<< map normalize <$> getFromNuc (optSigNuc opts)
         <* createDirectoryIfMissing False outdir
              where outdir = optOutDir opts
 
-runInfo opts = when (optVerbose opts) (putStrLn $ "Info mode: " ++ optSigNuc opts) *>
+runInfo opts = do 
+    when (optVerbose opts) (putStrLn $ "Info mode: " ++ optSigNuc opts)
+    funs <- getFromNuc (optSigNuc opts)
     (mapM_
-        (\ (a,b,c) -> putStrLn $ show a ++ ": " ++ show b ++ " (" ++ show c ++ ")")
-        . buildStats
-            =<< getFromNuc (optSigNuc opts))
-                    where outdir = optOutDir opts
+        (\ (a,b) -> putStrLn $ show a ++ ": " ++ show b)
+        $ buildStatsCFG funs (optNormalize opts))
+    let cfgs = map ((if (optNormalize opts) then combineNodes . extractLeafs else id) . cfgFromFunction) funs
+    putStrLn $ "widest switch: " ++ show (maximum $ map (IM.foldr (\ a -> max (length a)) 0 . edges . graph) cfgs)
 
 runLoose opt = do
     when (optVerbose opt) (putStrLn $ "Matching \"" ++ optSigNuc opt ++ "\" against \"" ++ optTarNuc opt ++ "\"")

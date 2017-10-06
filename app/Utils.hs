@@ -4,6 +4,7 @@ module Utils (
         getFromNuc,
         groupByBlockCount,
         normalizeCalls,
+        groupByCFGNodeCount,
         printDotFiles
     ) where
 
@@ -19,6 +20,12 @@ import Control.Parallel.Strategies
 import Signatures.Function
 import Signatures.Graph
 import Signatures.Nuc
+import Signatures.CFG
+
+groupByCFGNodeCount :: [(Function, CFG)] -> [(Int, [(Function, CFG)])]
+groupByCFGNodeCount = map (\ a -> (length . mapping . snd $ head a, a)) 
+    . List.groupBy (\ a b -> (length . mapping $ snd a) == (length . mapping $ snd b))
+        . List.sortOn (length . mapping . snd)
 
 printDotFiles :: String -> [Function] -> IO ()
 printDotFiles pre = mapM_ (\ x -> writeFile (pre ++ "/" ++ getFunName x) $ toDot x)

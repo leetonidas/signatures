@@ -1,5 +1,6 @@
 module Match (
         buildStats,
+        buildStatsCFG,
         canMatch,
         checkAll,
         checkGraphs,
@@ -66,6 +67,12 @@ buildStats =
     map
         (\ (x, funs) -> (x, length funs, if x > 2 then countUniqueCFG funs 0 else length funs))
         . groupByBlockCount
+
+buildStatsCFG :: [Function] -> Bool -> [(Int,Int)]
+buildStatsCFG funs opt = map (second length) 
+        . groupByCFGNodeCount
+            . map (\ x -> (x, (if opt then combineNodes . extractLeafs else id) $ cfgFromFunction x))
+                $ filter (not . null . funname) funs
 
 {-
 matchFunctions :: [Function] -> [Function] -> [(Function, [(Function, Constrains)])]
