@@ -3,11 +3,15 @@ module Signatures.CFG (
     Constrains(..),
     DiGraph(..),
     anotatePaths,
+    anotatePaths2,
+    anotatePaths',
     bestFit,
     checkCalls,
     cfgFromFunction,
+    consolidatePaths,
     combineNodes,
     extractLeafs,
+    findCircles,
     matchCFG,
     matchNodes,
     successor,
@@ -17,6 +21,7 @@ module Signatures.CFG (
 import Debug.Trace
 
 import Control.Arrow
+import Control.Monad.State
 import qualified Data.Map as Map
 import qualified Data.IntMap as IntMap
 import qualified Data.List as List
@@ -70,10 +75,67 @@ collectTransitive :: [PathID] -> [PathID] -> IntMap.IntMap [PathID] -> [PathID]
 collectTransitive [] col _ = col
 collectTransitive base col chld = collectTransitive (concat $ mapMaybe (`IntMap.lookup` chld) base) (base ++ col) chld
 
+consolidatePaths :: [PathID] -> IntMap.IntMap PathID -> IntMap.IntMap Int -> IntMap.IntMap [PathID] -> [PathID]
+consolidatePaths pts anc chld rep | null toConsolidate = pts
+                                  | otherwise =
+    consolidatePaths (foldr (\ a b -> IntMap.findWithDefault [fst $ head a] (fst $ head a) rep ++ filter (`List.notElem` map snd a) b) pts toConsolidate) anc chld rep
+            where toConsolidate = filter (\ a -> length a == fromJust (IntMap.lookup (fst $ head a) chld))
+                        . List.groupBy (\ a b -> fst a == fst b) . List.sortOn fst
+                            $ map (\ a -> (fromJust $ IntMap.lookup a anc, a)) pts
+
+getNumPred :: DiGraph -> IntMap.IntMap Int
+getNumPred gra = IntMap.map length . edges $ Signatures.Graph.transpose gra
+
+anotatePaths2 :: CFG -> (IntMap.IntMap [PathID], IntSet.IntSet)
+anotatePaths2 cfg = (anotatePaths2'
+    (graph cfg)
+    (Queue.Queue starts [])
+    (length starts + 2)
+    (IntMap.fromList . zip starts $ map (:[]) [1..])
+    (IntMap.union (IntMap.fromList $ map (\ a -> (a, 0)) starts ) . getNumPred $ graph cfg)
+    (IntMap.fromList $ map (\ a -> (a, 0) ) [1..length starts])
+    (IntMap.singleton 0 $ length starts + 1)
+    mempty, crcl)
+        where crcl = findCircles (graph cfg) $ entry cfg
+              starts = IntSet.toList $ IntSet.insert (entry cfg) crcl
+
+anotatePaths2' :: DiGraph -> Queue.Queue Node -> PathID -> IntMap.IntMap [PathID] -> IntMap.IntMap Int -> IntMap.IntMap PathID -> IntMap.IntMap Int -> IntMap.IntMap [PathID] -> IntMap.IntMap [PathID]
+anotatePaths2' gra qu nxtID pat numPred anc chld rep | null qu = IntMap.map (\ a -> consolidatePaths a anc chld rep) pat
+                                                     | otherwise = anotatePaths2' gra updQue newNxt
+                                            (IntMap.insert n pt $ IntMap.unionWith (++) updPt pat)
+                                            (IntMap.union (IntMap.fromList updNumPred) numPred)
+                                            (IntMap.union updAnc anc)
+                                            (IntMap.union updChld chld)
+                                            (IntMap.union updRep rep)
+        where (n, ns) = Queue.pop qu
+              pt = consolidatePaths (fromJust $ IntMap.lookup n pat) anc chld rep
+              desc = successor n gra
+              numDesc = length desc
+              repElem = nxtID + numDesc
+              newNxt = if numDesc > 1 then repElem + 1 else nxtID
+              followIds = [nxtID..nxtID + numDesc - 1]
+              updNumPred = filter (\ a -> snd a >= 0) $ map (\ a -> (a, (fromJust $ IntMap.lookup a numPred) - 1)) desc
+              updPt = IntMap.fromList $ if numDesc > 1 then zip desc $ map (:[]) followIds else zip desc [pt]
+              updRep = IntMap.fromList $ if numDesc > 1 then [(repElem, pt)] else mempty
+              updAnc = IntMap.fromList $ if numDesc > 1 then map (\ a -> (a, repElem)) followIds else mempty
+              updChld = IntMap.fromList $ if numDesc > 1 then [(repElem, numDesc)] else mempty
+              toEnq = map fst $ filter (\ a -> snd a == 0) updNumPred
+              updQue = foldr Queue.insert ns toEnq
+
+mark :: DiGraph -> Node -> State (IntSet.IntSet, IntSet.IntSet) ()
+mark gra n = (\ (back, all) -> put
+        (IntSet.union back . IntSet.fromList . filter (`IntSet.member` all) $ successor n gra
+        , IntSet.insert n all)) =<< get
+
+{-
+findCircles :: DiGraph -> Node -> IntSet.IntSet
+findCircles gra n = fst . snd $ runState (bfs gra (mark gra) (Queue.Queue [n] []) mempty) (mempty, mempty)
+-}
+
 anotatePaths' :: DiGraph -> Queue.Queue (PathID, Node) -> PathID -> IntMap.IntMap [PathID] -> IntMap.IntMap [PathID] -> IntMap.IntMap [Node] -> IntMap.IntMap [(Node, [PathID])] -> IntSet.IntSet -> (IntMap.IntMap [PathID], IntSet.IntSet)
 anotatePaths' cfg queue nxtID anc children paths spl mark  | null queue = (buildPaths paths, mark)
-                                                            | or loopTar = trace ("mark " ++ show n) $ anotatePaths' cfg pts nxtID anc children paths spl $ IntSet.insert n mark
-                                                            | all (not . null) cutPaths = trace ("combine to " ++ show parents ++ " from " ++ show (pt:siblings) ++ " purging " ++ show toPurge) $
+                                                           | or loopTar = trace ("mark " ++ show n) $ anotatePaths' cfg pts nxtID anc children paths spl $ IntSet.insert n mark
+                                                           | all (not . null) cutPaths = trace ("combine to " ++ show parents ++ " from " ++ show (pt:siblings) ++ " purging " ++ show toPurge) $
                                                                 anotatePaths'
                                                                     cfg
                                                                     (Queue.insertFront (parents, n) $ Queue.filter (not . flip elem (siblings ++ toPurge) . fst) pts)
@@ -82,7 +144,7 @@ anotatePaths' cfg queue nxtID anc children paths spl mark  | null queue = (build
                                                                     (IntMap.delete parents . IntMap.withoutKeys children . IntSet.union toPurgeSet $ IntSet.fromList siblings)
                                                                     (IntMap.union (IntMap.fromList $ zip siblings newPaths) $ IntMap.withoutKeys paths toPurgeSet)
                                                                     newSplit mark
-                                                            | otherwise = case sucs of
+                                                           | otherwise = case sucs of
                                                                 [] -> trace (show pt ++ " hit an end")
                                                                     $ anotatePaths' cfg pts nxtID anc children updatePaths spl mark
                                                                 (s:[]) -> trace (show pt ++ " advances")
@@ -240,9 +302,9 @@ bestFit fs ft ns nts = List.map fst $ List.sortOn (abs . (-) (bbinsCount bs) . b
             comb
 
 matchCFGSkip :: CFG -> CFG -> CFGMatch -> Node -> Node -> [CFGMatch]
-matchCFGSkip fs ft ma ns nt  | length suc1New /= length suc2New = []
+matchCFGSkip fs ft ma ns nt  | length suc1New /= length suc2New || not (IntSet.isSubsetOf tar $ IntSet.fromList suc2) = []
                              | otherwise = if null suc1New then
-                                        [ma]
+                                        (if tar == IntSet.fromList suc2 then [ma] else [])
                                     else
                                         concatMap
                                             (\x -> matchCFGSkip fs ft x ns nt)
@@ -253,6 +315,7 @@ matchCFGSkip fs ft ma ns nt  | length suc1New /= length suc2New = []
                                                     else expand (head suc1New) $ bestFit fs ft (head suc1New) suc2New
                                     where suc1 = successor ns $ graph fs
                                           suc2 = successor nt $ graph ft
+                                          tar = IntSet.fromList $ mapMaybe (flip IntMap.lookup (matches ma)) suc1
                                           suc1New = filter (flip IntMap.notMember (matches ma)) suc1
                                           suc2New = IntSet.toList . IntSet.difference (IntSet.fromList suc2) . IntSet.fromList . IntMap.elems $ matches ma
 

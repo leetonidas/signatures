@@ -3,6 +3,9 @@ module Signatures.Graph (
         GraphMatch(..),
         Node,
         diGraphToDot,
+        bfs,
+        dfs,
+        findCircles,
         localComplexity,
         matchGraphs,
         singleEntryNodes,
@@ -10,9 +13,12 @@ module Signatures.Graph (
         transpose
     ) where
 
+import Control.Monad.State
+
 import qualified Data.IntMap.Lazy as IntMap
 import qualified Data.List as List
 import qualified Data.IntSet as IntSet
+import qualified Signatures.Queue as Queue
 import Data.Maybe
 
 type Node = Int
@@ -50,7 +56,34 @@ successor n = IntMap.findWithDefault [] n . edges
 
 expand :: Functor f =>  a -> f b -> f (a, b)
 expand a bs = (\ x -> (a, x)) <$> bs
-        
+
+dfs :: DiGraph -> (Node -> State a ()) -> [Node] -> IntSet.IntSet -> State a ()
+dfs gra fun lst vst | null lst = return ()
+                    | hd `IntSet.member` vst = dfs gra fun tl vst
+                    | otherwise = fun hd >> dfs gra fun newL (IntSet.insert hd vst)
+    where (hd, tl) = fromJust $ List.uncons lst
+          newL = successor hd gra ++ lst
+
+
+bfs :: DiGraph -> (Node -> State a ()) -> Queue.Queue Node -> IntSet.IntSet -> State a ()
+bfs gra fun queue vst   | null queue = return ()
+                        | hd `IntSet.member` vst = bfs gra fun tl vst
+                        | otherwise = fun hd >> bfs gra fun newQ (IntSet.insert hd vst)
+    where (hd, tl) = Queue.pop queue
+          newQ = foldr (Queue.insert) tl $ successor hd gra
+
+-- todo complet rewrite
+findCircles' :: DiGraph -> IntSet.IntSet -> [Node] -> (IntSet.IntSet, IntSet.IntSet)
+findCircles' gra mark nods | n `IntSet.member` mark = (mark, mempty)
+                           | otherwise = foldr (\ nd (m, b) -> let (m', b') = findCircles' gra m (nd:nods) in (m', IntSet.union b b')) (mark', bck) nxt
+    where n = head nods
+          nxt = successor n gra
+          mark' = IntSet.insert n mark
+          bck = IntSet.fromList $ filter (`List.elem` nods) nxt
+
+findCircles :: DiGraph -> Node -> IntSet.IntSet
+findCircles gra n = snd $ findCircles' gra mempty [n]
+
 -- graph a -> graph b -> matched nodes
 matchGraphs :: DiGraph -> DiGraph -> GraphMatch -> Node -> Node -> [GraphMatch]
 matchGraphs fs ft ma ns nt | length suc1 /= length suc2 = []

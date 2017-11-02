@@ -24,6 +24,7 @@ library
                      , containers >= 0.5.10.2
                      , parsec
                      , extra
+                     , mtl
   default-language:    Haskell2010
 
 executable signatures-exe
