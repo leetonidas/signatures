@@ -1,0 +1,260 @@
+diff --git a/Makefile b/Makefile
+index a87d5ca..e99fc3f 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,6 +1,6 @@
+ CXX=g++
+ CXXFLAGS=-Wall -std=c++11 -O2 -DNDEBUG
+-LDFLAGS=-lcapstone -lbfd-multiarch
++LDFLAGS=-lcapstone -lbfd
+ 
+ SRC=$(wildcard *.cc)
+ OBJ=$(patsubst %.cc, obj/%.o, $(SRC))
+diff --git a/bb.cc b/bb.cc
+index b73e57a..47ab7f8 100644
+--- a/bb.cc
++++ b/bb.cc
+@@ -4,6 +4,51 @@
+ #include "insn.h"
+ 
+ 
++void
++BB::print_sig_info(FILE *out, const char *prefix) {
++  bool tmp = false;
++  fprintf(out, "%sLENGTH: %lu\n", prefix, insns.size());
++  for (Edge &e : targets) {
++    if ((e.type == Edge::EDGE_TYPE_CALL || e.type == Edge::EDGE_TYPE_CALL_INDIRECT) && e.dst != NULL) {
++      if (!tmp)
++        fprintf(out, "%sCALLS:", prefix);
++      fprintf(out, " %#lx", e.dst->start);
++      tmp = true;
++    }
++  }
++  if (tmp) {
++    fprintf(out, "\n");
++    tmp = false;
++  }
++
++  for (Edge &e : targets) {
++    if (e.type != Edge::EDGE_TYPE_CALL && e.type != Edge::EDGE_TYPE_CALL_INDIRECT && e.dst != NULL) {
++      if (!tmp)
++        fprintf(out, "%sANC:", prefix);
++      fprintf(out, " %#lx", e.dst->start);
++      tmp = true;
++    }
++  }
++  if (tmp) {
++    fprintf(out, "\n");
++    tmp = false;
++  }
++  
++  for (Edge &e : targets) {
++    if (e.dst == NULL && e.type == Edge::EDGE_TYPE_CALL_INDIRECT) {
++      fprintf(out, "%sIND_CALL: True\n", prefix);
++      break;
++    }
++  }
++  
++  for (Edge &e : targets) {
++    if (e.dst == NULL && e.type == Edge::EDGE_TYPE_JMP_INDIRECT) {
++      fprintf(out, "%sIND_JMP: True\n", prefix);
++      break;
++    }
++  }
++}
++
+ void
+ BB::print(FILE *out)
+ {
+diff --git a/bb.h b/bb.h
+index 1fba8b3..cd337d7 100644
+--- a/bb.h
++++ b/bb.h
+@@ -33,6 +33,7 @@ public:
+   bool returns      ();
+ 
+   void print(FILE *out);
++  void print_sig_info(FILE *out, const char *prefix);
+ 
+   static bool comparator (BB& bb, BB& cc)     { return bb.start < cc.start; }
+   inline bool operator<  (const BB& cc) const { return this->start < cc.start; }
+diff --git a/export.cc b/export.cc
+index ef79092..1ee4933 100644
+--- a/export.cc
++++ b/export.cc
+@@ -6,7 +6,24 @@
+ #include "nucleus.h"
+ #include "export.h"
+ 
+-
++int
++export_signature (std::string &fname, CFG *cfg, Binary *bin) {
++  FILE *f;
++  f = fopen(fname.c_str(), "w");
++  if (!f) {
++    print_err("cannot open file %s for writing", fname.c_str());
++    return -1;
++  }
++  
++  for(Function &fun: cfg->functions) {
++    fun.print_sig_info(f, bin);
++    fprintf(f, "\n");
++  }
++  
++  fclose(f);
++  return 0;
++}
++  
+ int
+ export_bin2ida(std::string &fname, Binary *bin, std::list<DisasmSection> *disasm, CFG *cfg)
+ {
+diff --git a/export.h b/export.h
+index 54e0bd1..953baca 100644
+--- a/export.h
++++ b/export.h
+@@ -11,6 +11,7 @@
+ int export_bin2ida (std::string &fname, Binary *bin, std::list<DisasmSection> *disasm, CFG *cfg);
+ int export_bin2binja (std::string &fname, Binary *bin, std::list<DisasmSection> *disasm, CFG *cfg);
+ int export_cfg2dot (std::string &fname, CFG *cfg);
++int export_signature (std::string &fname, CFG *cfg, Binary* bin);
+ 
+ #endif /* NUCLEUS_EXPORT_H */
+ 
+diff --git a/function.cc b/function.cc
+index ebed5f2..d5054d4 100644
+--- a/function.cc
++++ b/function.cc
+@@ -1,6 +1,7 @@
+ #include <stdio.h>
+ #include <stdint.h>
+ 
++#include <algorithm>
+ #include <list>
+ 
+ #include "cfg.h"
+@@ -11,6 +12,25 @@
+ 
+ uint64_t Function::global_id = 0;
+ 
++void
++Function::print_sig_info(FILE *out, Binary *bin) {
++  fprintf(out, "fun_%#lx:\n", id);
++  
++  auto sym_name = std::find_if(bin->symbols.begin(), bin->symbols.end(), [=] (Symbol &sym) {return sym.type == Symbol::SYM_TYPE_FUNC && sym.addr == this->start;});
++  if (sym_name != bin->symbols.end()) {
++    fprintf(out, "\tNAME: %s\n", sym_name->name.c_str());
++  }
++
++
++  fprintf(out, "\tENTRYS:");
++  fprintf(out, " %#lx\n", start);
++  fprintf(out, "\tBLOCKS:\n");
++  for (BB *block : BBs) {
++    fprintf(out, "\t\t%#lx:\n", block->start);
++    block->print_sig_info(out, "\t\t\t");
++  }
++}
++
+ void
+ Function::print(FILE *out)
+ {
+diff --git a/function.h b/function.h
+index 801ed77..560489a 100644
+--- a/function.h
++++ b/function.h
+@@ -7,6 +7,7 @@
+ #include <list>
+ 
+ #include "bb.h"
++#include "loader.h"
+ 
+ class CFG;
+ 
+@@ -16,6 +17,7 @@ public:
+ 
+   void print (FILE *out);
+   void print_summary (FILE *out);
++  void print_sig_info (FILE *out, Binary *bin);
+ 
+   void find_entry ();
+   void add_bb     (BB *bb);
+diff --git a/loader.cc b/loader.cc
+index 6849270..c5ae9c5 100644
+--- a/loader.cc
++++ b/loader.cc
+@@ -7,6 +7,7 @@
+ #include <string>
+ #include <vector>
+ 
++#define PACKAGE "libgrive" /* dummy to keep <bfd.h> happy */
+ #include <bfd.h>
+ 
+ #include "log.h"
+diff --git a/nucleus.cc b/nucleus.cc
+index 05f81de..fd3589e 100644
+--- a/nucleus.cc
++++ b/nucleus.cc
+@@ -81,6 +81,9 @@ main(int argc, char *argv[])
+   if(!options.exports.dot.empty()) {
+     (void)export_cfg2dot(options.exports.dot, &cfg);
+   }
++  if(!options.exports.signature.empty()) {
++    (void)export_signature(options.exports.signature, &cfg, &bin);
++  }
+ 
+   unload_binary(&bin);
+ 
+diff --git a/options.cc b/options.cc
+index b602195..a8ee0de 100644
+--- a/options.cc
++++ b/options.cc
+@@ -23,7 +23,7 @@ print_usage(char *prog)
+ 
+   printf(NUCLEUS_VERSION"\n");
+   printf(NUCLEUS_CREDITS"\n");
+-  printf("\n%s [-vwhtafbDpgi] -e <binary> -d <strategy>\n", prog);
++  printf("\n%s [-vwhtafbDpgis] -e <binary> -d <strategy>\n", prog);
+   printf("  -e <binary>\n");
+   printf("     : target binary\n");
+   printf("  -d <strategy>\n");
+@@ -55,6 +55,8 @@ print_usage(char *prog)
+   printf("  -v : verbose\n");
+   printf("  -w : disable warnings\n");
+   printf("  -h : help\n");
++  printf("  -s <file>\n");
++  printf("     : print signatures to file\n");
+   printf("\nConfiguration used in paper 'Compiler-Agnostic Function Detection in Binaries':\n");
+   printf("    %s -d linear -f -e <binary>\n", prog);
+   printf("\n");
+@@ -65,7 +67,7 @@ int
+ parse_options(int argc, char *argv[])
+ {
+   int i, opt;
+-  char optstr[] = "vwhd:t:a:fb:Dpg:i:n:e:";
++  char optstr[] = "vwhd:t:a:fb:Dpg:i:n:e:s:";
+   extern const char *binary_types_descr[][2];
+   extern const char *binary_arch_descr[][2];
+   std::string s;
+@@ -173,6 +175,10 @@ parse_options(int argc, char *argv[])
+     case 'd':
+       options.strategy_function.name = std::string(optarg);
+       break;
++    
++    case 's':
++      options.exports.signature = std::string(optarg);
++      break;
+ 
+     case 'h':
+     default:
+diff --git a/options.h b/options.h
+index 07a3820..871071c 100644
+--- a/options.h
++++ b/options.h
+@@ -26,6 +26,7 @@ struct options {
+     std::string ida;
+     std::string binja;
+     std::string dot;
++    std::string signature;
+   } exports;
+ 
+   struct {
