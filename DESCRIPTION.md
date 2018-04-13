@@ -1,15 +1,21 @@
 # Signatures
 
-This is the reference implementation for CFG Based Function Identification
+This repository contains supporting material for the paper 
 
-# build nucleus
+# Material
+
+ - The paper itself
+ - The slide deck as presented at ROOTS 2017
+ - The source code
+
+# Build nucleus
 apply nucleus.patch to [nucleus](https://bitbucket.org/vusec/nucleus) from commit: 9ef73e8.
 then build nucleus
 
-# build signatures
+# Build signatures
 stack build
 
-# usage
+# Usage
 
 run nucleus to generate signatures from some binary
 ./nucleus -e binary -s sigs -d linear
