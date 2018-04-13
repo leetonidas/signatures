@@ -1,6 +1,6 @@
 # Signatures
 
-This repository contains supporting material for the paper 
+This repository contains supporting material for the paper `Enhancing Control Flow Graph Based Binary Function Identification`.
 
 # Material
 
